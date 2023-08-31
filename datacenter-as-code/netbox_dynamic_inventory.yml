@@ -1,0 +1,10 @@
+---
+plugin: netbox.netbox.nb_inventory
+api_endpoint: <netbox-url>
+validate_certs: false
+config_context: true
+group_by:
+  - device_roles
+device_query_filters:
+  - status: "active"
+  - tag: "arista-dc"

@@ -1,0 +1,133 @@
+### Ansible Playbook to Generate Desired Configuration Files for Arista Datacenter Network
+### and run CI Checks
+### and Deploy Configs to Arista Cloudvision Platform
+---
+- name: Arista Cloudvision Datacenter Playbook
+  # Deploy to either stage or prod (use command line extra vars to set) - defaults to stage nev
+  hosts: "{{ deploy_hosts | default('device_roles_dc-stg') }}"
+  # lookup and decrypt vault file from command line --ask-vault-pass. Contains secrets and api keys
+  vars_files: vault.yml
+  connection: local
+  gather_facts: False
+  vars:
+    # token to use to connect to cvp as a service arista.io
+    ansible_password: "{{ cvp_token2 }}"
+    ansible_httpapi_host: www.arista.io
+    ansible_host: www.arista.io
+    ansible_user: cvaas
+    ansible_connection: httpapi
+    ansible_httpapi_use_ssl: True
+    ansible_httpapi_validate_certs: False
+    ansible_network_os: eos
+    ansible_httpapi_port: 443
+    ansible_command_timeout: 1200
+    ansible_connect_timeout: 600
+    # how long to wait for cvp to commit changes in change control
+    change_wait_timeout: 120
+    # dict to store configlets per host
+    configlets: {}
+  tasks:
+    - name: Template Lookup and Config Generation
+      # generate template of system params. Variables are filled in by Netbox (from hostvars pulled to inventory)
+      template:
+        src: "{{playbook_dir}}/templates/{{ hostvars[inventory_hostname]['config_context'][0]['template_name'] }}.j2"
+        # create a temp candidate config file to be loaded in next task
+        dest: "{{playbook_dir}}/generated_configs/{{ inventory_hostname }}.conf"
+      delegate_to: localhost
+      tags:
+        - generate_config
+
+    - name: "Push configlet to CVP"
+      # for each host, lookup the generated config and push up to cvp
+      arista.cvp.cv_configlet_v3:
+        configlets: "{{ configlets | combine ({ inventory_hostname : lookup('file', '{{playbook_dir}}/generated_configs/'+inventory_hostname+'.conf') }) }}"
+        state: present
+      register: configlet_push
+      tags:
+        - push_to_cvp
+
+    - name: Save taskIDs to file
+      # for each host, grab the taskID that was created in previous step and save it to a local flat file
+      ansible.builtin.lineinfile:
+        path: "{{playbook_dir}}/task_id_list.txt"
+        line: "{{ configlet_push.taskIds[0] }}"
+        create: yes
+      when: configlet_push.taskIds[0] is defined
+      tags:
+        - push_to_cvp
+
+    - name: convert task list file to ansible list
+      # grab task file created from previous function and create a task id list to be used in next function
+      set_fact:
+        taskIds: "{{ taskIds | default([]) + [item] }}"
+      with_lines: "cat {{playbook_dir}}/task_id_list.txt"
+      # only run this once, not for every host
+      run_once: True
+      tags:
+        - execute_change
+
+    - name: Remove taskid file (delete file)
+      # delete task file of taskids so it doesnt conflict on future runs
+      ansible.builtin.file:
+        path: "{{playbook_dir}}/task_id_list.txt"
+        state: absent
+      run_once: True
+      tags:
+        - execute_change
+
+    - name: Generate JSON Change File
+      # CVP has speciific way to list out multiple changes. Use json template to variablize these for multiple hosts
+      template:
+        src: "templates/change_vars.j2"
+        dest: "{{playbook_dir}}/generated_configs/change_vars.json"
+      delegate_to: localhost
+      run_once: True
+      tags:
+        - execute_change
+
+    - name: Get Change Vars
+      # Load the previously created change vars file into memory for next task
+      ansible.builtin.include_vars:
+        file: "{{playbook_dir}}/generated_configs/change_vars.json"
+      run_once: True
+      tags:
+        - execute_change
+
+    - name: "Create a change control on {{inventory_hostname}}"
+      # call out to CVP as a service and create a change control window with all the previously created tasks
+      arista.cvp.cv_change_control_v3:
+        state: set
+        change: "{{ change }}"
+      register: cv_change_control
+      run_once: True
+      tags:
+        - execute_change
+
+    - name: "Approve a change control on {{inventory_hostname}}"
+      # Approve change window in CVP
+      arista.cvp.cv_change_control_v3:
+        state: approve_and_execute
+        change_id: ["{{cv_change_control.data.id}}"]
+      run_once: True
+      tags:
+        - execute_change
+
+    - name: Sleep for X seconds while change control executes
+      # wait for cvp change control window to complete
+      ansible.builtin.wait_for:
+        timeout: "{{change_wait_timeout}}"
+      delegate_to: localhost
+      run_once: True
+      tags:
+        - execute_change
+
+    - name: "Check Change Control Status"
+      # if change window status is completed then we are good, otherwise fail
+      arista.cvp.cv_change_control_v3:
+        state: show
+        change_id: ["{{cv_change_control.data.id}}"]
+      register: change_info
+      failed_when: change_info['data']['change_controls:'][0]['value']['status'] != 'CHANGE_CONTROL_STATUS_COMPLETED'
+      run_once: True
+      tags:
+        - execute_change

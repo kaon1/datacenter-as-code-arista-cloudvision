@@ -1,0 +1,50 @@
+name: digitaltwin-staging-build
+prefix: ""
+topology:
+  nodes:
+    digitaltwin-staging-build-core01:
+      kind: ceos
+      image: ceos:latest
+      ports:
+        - 50001:22
+    digitaltwin-staging-build-core02:
+      kind: ceos
+      image: ceos:latest
+      ports:
+        - 50002:22
+    digitaltwin-staging-build-access01:
+      kind: ceos
+      image: ceos:latest
+      ports:
+        - 50003:22
+    digitaltwin-staging-build-access02:
+      kind: ceos
+      image: ceos:latest
+      ports:
+        - 50004:22
+    digitaltwin-staging-build-server01:
+      kind: linux
+      image: "linux:latest"
+      env:
+        TMODE: lacp
+      ports:
+        - 50005:22
+    digitaltwin-staging-build-client01:
+      kind: linux
+      image: linux:latest
+      ports:
+        - 50006:22
+  links:
+        - endpoints: [digitaltwin-staging-build-core01:eth1,digitaltwin-staging-build-core02:eth1]
+        - endpoints: [digitaltwin-staging-build-core01:eth2,digitaltwin-staging-build-core02:eth2]
+        - endpoints: [digitaltwin-staging-build-core01:eth3,digitaltwin-staging-build-access01:eth1]
+        - endpoints: [digitaltwin-staging-build-core01:eth4,digitaltwin-staging-build-access02:eth1]
+        - endpoints: [digitaltwin-staging-build-core02:eth3,digitaltwin-staging-build-access01:eth2]
+        - endpoints: [digitaltwin-staging-build-core02:eth4,digitaltwin-staging-build-access02:eth2]
+        - endpoints: [digitaltwin-staging-build-server01:eth1,digitaltwin-staging-build-core01:eth5]
+        - endpoints: [digitaltwin-staging-build-server01:eth2,digitaltwin-staging-build-core02:eth5]
+        - endpoints: [digitaltwin-staging-build-client01:eth1,digitaltwin-staging-build-access01:eth3]
+
+mgmt:
+  network: digitaltwin-staging-build-network
+  ipv4-subnet: 172.100.11.0/24

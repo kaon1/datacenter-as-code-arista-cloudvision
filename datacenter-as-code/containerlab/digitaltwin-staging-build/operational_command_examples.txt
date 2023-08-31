@@ -1,0 +1,12 @@
+
+# assign ips to docker images
+docker exec -it <container-name> /bin/sh -c "sudo ifconfig team0 10.x.x.x netmask 255.x.x.x"
+docker exec -it <container-name> /bin/sh -c "sudo ifconfig eth1 10.x.x.x netmask 255.x.x.x"
+
+# take packet captures and send to wireshark locally 
+ssh root@<server> "ip netns exec <container-name> tcpdump -U -nni team0 -w -" | /mnt/c/Program\ Files/Wireshark/wireshark.exe -k -i -
+ssh root@<server> "ip netns exec <container-name> tcpdump -U -nni eth1 -w -" | /mnt/c/Program\ Files/Wireshark/wireshark.exe -k -i -
+
+# iperf tests
+docker exec -it <container-name> /bin/sh -c "sudo iperf3 -s -B <ip> -p 5201"
+docker exec -it <container-name> /bin/sh -c "sudo iperf3 -c <ip> -b 10Mbit -p 5201 -P 5 -t 60"

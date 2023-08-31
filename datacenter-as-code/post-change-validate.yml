@@ -1,0 +1,28 @@
+---
+- name: Arista Datacenter Post Validations
+  # Deploy to either stage or prod (use command line extra vars to set) - defaults to stage nev
+  hosts: "{{ deploy_hosts | default('device_roles_dc-stg') }}"
+  # lookup and decrypt vault file from command line --ask-vault-pass. Contains secrets and api keys
+  vars_files: vault.yml
+  gather_facts: False
+  vars:
+    ansible_password: "{{ ssh_pw }}"
+    ansible_user: kaon
+    ansible_connection: network_cli
+    ansible_network_os: eos
+  tasks:
+    - name: Validation Check 1 - Check IP Route Table
+      arista.eos.eos_command:
+        commands:
+          - command: show ip route 10.1.1.0
+            output: json
+      register: route_table_output
+      failed_when: route_table_output.stdout[0].vrfs.default.routes is not defined
+
+    - name: Validation Check 2 - Check ARP Table
+      arista.eos.eos_command:
+        commands:
+          - command: show arp summary
+            output: json
+      register: arp_table_output
+      failed_when: arp_table_output.stdout[0].totalEntries < 1

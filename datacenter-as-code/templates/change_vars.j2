@@ -1,0 +1,19 @@
+{
+    "change": {
+      "name": "Change Created By Ansible",
+      "notes": "Created via playbook",
+      "activities": [
+        {% for item in taskIds %}
+        {
+          "task_id": "{{ item }}",
+          "stage": "ansible_change_window"
+        },
+        {% endfor %}
+      ],
+      "stages": [
+        {
+          "name": "ansible_change_window"
+        }
+      ]
+    }
+  }
